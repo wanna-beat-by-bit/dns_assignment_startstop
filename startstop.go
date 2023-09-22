@@ -38,29 +38,32 @@ type Service interface {
 	Stop(ctx context.Context) error
 }
 
+// фейковая реализация сервиса
 type MockService struct {
+	//Имя сервиса
 	name string
-	//Можно задать время старта сервиса самому
-	longStartTime int
-	//Статус, был ли запущен сервис
+	//Можно задать время старта/стопа сервиса самому
+	fakeDuration int
+	//Статус, был ли запущен сервис, чтобы было что стопить
 	status bool
 }
 
-func New(name string, longStartTime int) Service {
+// конструктор с зависимостями
+func New(name string, fakeDuration int) Service {
 	return &MockService{
-		name:          name,
-		longStartTime: longStartTime,
-		status:        false,
+		name:         name,
+		fakeDuration: fakeDuration,
+		status:       false,
 	}
 }
 
 func (ms *MockService) Start(ctx context.Context) error {
 	doneStarting := make(chan struct{})
-	// представим, что самый худший случай запуска севриса - вечноть,
-	// поэтому обернем запуск в горутину, и будем ждать конца через канал
+	// представим, что самый худший случай запуска сервиса - вечность,
+	// поэтому обернем запуск в горутину, и будем ждать завершения через канал
 	go func() {
 		log.Printf("[INFO] starting service %s...", ms.name)
-		time.Sleep(time.Second * time.Duration(ms.longStartTime))
+		time.Sleep(time.Second * time.Duration(ms.fakeDuration))
 		ms.status = true
 		doneStarting <- struct{}{}
 	}()
@@ -73,15 +76,19 @@ func (ms *MockService) Start(ctx context.Context) error {
 	}
 }
 
+// Принцип механизма похож на старт
 func (ms *MockService) Stop(ctx context.Context) error {
 	doneStarting := make(chan struct{})
-	// Делаем также, как и для старта сервисов
+
+	//если сервис не стартовал ранее, то закрывать нечего
 	if !ms.status {
 		return nil
 	}
 	go func() {
 		log.Printf("[INFO] stopping service %s...", ms.name)
-		time.Sleep(time.Second * 1)
+		// добавил 2 секунды в стопу каждого сервиса,
+		// чтобы симулировать плохое завершение одного из сервисов
+		time.Sleep(time.Second*time.Duration(ms.fakeDuration) + time.Second*1)
 		doneStarting <- struct{}{}
 	}()
 
@@ -93,18 +100,14 @@ func (ms *MockService) Stop(ctx context.Context) error {
 	}
 }
 
+// В случае безуспешного старта сервис(а)/(ов), генерируем сигнал закрытия программы
 func generateSIGTERM() error {
+	// все ошибки игнорируются, так как, скорее всего, проблем с остановкой
+	// текущей программы быть не должно.
+
 	pid := os.Getpid()
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("can't find a process: %s", err.Error())
-	}
-
-	err = process.Signal(syscall.SIGTERM)
-	if err != nil {
-		return fmt.Errorf("can't send SIGTERM to a process: %s", err.Error())
-	}
-
+	process, _ := os.FindProcess(pid)
+	_ = process.Signal(syscall.SIGTERM)
 	return nil
 }
 
@@ -112,8 +115,8 @@ func main() {
 	// Предположим, что существует несколько сервисов
 	var services []Service
 	services = append(services, New("A", 1))
-	services = append(services, New("B", 1))
-	services = append(services, New("C", 3))
+	services = append(services, New("B", 2))
+	services = append(services, New("C", 1))
 
 	sysExit := make(chan os.Signal, 1)
 	signal.Notify(sysExit, syscall.SIGINT, syscall.SIGTERM)
@@ -124,12 +127,12 @@ func main() {
 	for _, service := range services {
 		// Даем каждому сервису по 5 секунд на запуск, хотя зависит от наших целей,
 		// нужно дать в целом на запуск программы 5 секунд, либо каждому сервису
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 		defer cancel()
 		if err := service.Start(ctx); err != nil {
 			log.Printf("[ERROR] can't start service: %s", err.Error())
 			globalProgramStatus = 1
-			_ = generateSIGTERM()
+			generateSIGTERM()
 			break
 		}
 	}
@@ -141,7 +144,7 @@ func main() {
 	log.Println("[INFO] Shutting down...")
 
 	for index := range services {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 		defer cancel()
 		//отсчет в обратном порядке
 		serviceIndex := (len(services) - 1) - index
@@ -151,6 +154,5 @@ func main() {
 		}
 	}
 
-	fmt.Println("Working with status:", globalProgramStatus)
 	os.Exit(globalProgramStatus)
 }
