@@ -88,7 +88,7 @@ func (ms *MockService) Stop(ctx context.Context) error {
 		log.Printf("[INFO] stopping service %s...", ms.name)
 		// добавил 2 секунды в стопу каждого сервиса,
 		// чтобы симулировать плохое завершение одного из сервисов
-		time.Sleep(time.Second*time.Duration(ms.fakeDuration) + time.Second*1)
+		time.Sleep(time.Second*time.Duration(ms.fakeDuration) + time.Second*2)
 		doneStarting <- struct{}{}
 	}()
 
@@ -144,7 +144,7 @@ func main() {
 	log.Println("[INFO] Shutting down...")
 
 	for index := range services {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 		defer cancel()
 		//отсчет в обратном порядке
 		serviceIndex := (len(services) - 1) - index
